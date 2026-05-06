@@ -1,6 +1,6 @@
 export type ProviderId = 'zai' | 'openai';
 
-export type OpenAIModelId = 'gpt-image-1' | 'dall-e-3' | 'dall-e-2';
+export type OpenAIModelId = 'gpt-image-2' | 'gpt-image-1' | 'gpt-image-1-mini' | 'dall-e-3' | 'dall-e-2';
 
 export interface OpenAIModelOption {
   id: OpenAIModelId;
@@ -22,9 +22,19 @@ export interface ProviderOption {
 
 export const OPENAI_MODELS: OpenAIModelOption[] = [
   {
+    id: 'gpt-image-2',
+    name: 'GPT Image 2',
+    description: 'El modelo más avanzado de OpenAI. Calidad superior, soporta resoluciones arbitrarias y excelente preservación de identidad.',
+  },
+  {
     id: 'gpt-image-1',
     name: 'GPT Image 1',
-    description: 'Modelo más reciente de generación de imágenes de OpenAI. Alta calidad y comprensión avanzada del contexto.',
+    description: 'Alta calidad y comprensión avanzada del contexto. Soporta edición directa de imágenes.',
+  },
+  {
+    id: 'gpt-image-1-mini',
+    name: 'GPT Image 1 Mini',
+    description: 'Versión eficiente y económica de GPT Image 1. Más rápida y con menor costo, ideal para transformaciones simples.',
   },
   {
     id: 'dall-e-3',
@@ -34,7 +44,7 @@ export const OPENAI_MODELS: OpenAIModelOption[] = [
   {
     id: 'dall-e-2',
     name: 'DALL·E 2',
-    description: 'Modelo anterior, más rápido y económico. Buena calidad para transformaciones simples.',
+    description: 'Modelo anterior, más rápido y económico. Soporta edición directa de imágenes.',
   },
 ];
 
@@ -57,7 +67,7 @@ export const PROVIDER_OPTIONS: ProviderOption[] = [
     apiKeyLabel: 'OpenAI API Key',
     apiKeyPlaceholder: 'sk-...',
     models: OPENAI_MODELS,
-    defaultModel: 'gpt-image-1',
+    defaultModel: 'gpt-image-2',
   },
 ];
 

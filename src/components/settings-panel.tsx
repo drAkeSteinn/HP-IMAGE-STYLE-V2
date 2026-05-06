@@ -17,7 +17,9 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
+import { Checkbox } from '@/components/ui/checkbox';
 import { PROVIDER_OPTIONS, OPENAI_MODELS, type ProviderId, type OpenAIModelId } from '@/lib/providers';
+import { STYLE_OPTIONS, type StyleId } from '@/lib/styles';
 import { cn } from '@/lib/utils';
 import { Eye, EyeOff, Settings2 } from 'lucide-react';
 import { useState } from 'react';
@@ -32,6 +34,8 @@ interface SettingsPanelProps {
   onApiKeyChange: (key: string) => void;
   openaiModel: OpenAIModelId;
   onModelChange: (model: OpenAIModelId) => void;
+  enabledStyles: Record<StyleId, boolean>;
+  onEnabledStylesChange: (enabledStyles: Record<StyleId, boolean>) => void;
   disabled?: boolean;
 }
 
@@ -44,11 +48,22 @@ export function SettingsPanel({
   onApiKeyChange,
   openaiModel,
   onModelChange,
+  enabledStyles,
+  onEnabledStylesChange,
   disabled,
 }: SettingsPanelProps) {
   const [showApiKey, setShowApiKey] = useState(false);
 
   const currentProvider = PROVIDER_OPTIONS.find((p) => p.id === selectedProvider);
+
+  const handleStyleToggle = (styleId: StyleId, checked: boolean) => {
+    onEnabledStylesChange({
+      ...enabledStyles,
+      [styleId]: checked,
+    });
+  };
+
+  const enabledCount = Object.values(enabledStyles).filter(Boolean).length;
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
@@ -195,6 +210,50 @@ export function SettingsPanel({
 
           <Separator />
 
+          {/* Style Visibility */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold">Estilos visibles</Label>
+              <span className="text-xs text-muted-foreground">
+                {enabledCount} de {STYLE_OPTIONS.length} activos
+              </span>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Selecciona qué estilos estarán disponibles para los usuarios en la pantalla principal.
+            </p>
+            <div className="space-y-2">
+              {STYLE_OPTIONS.map((style) => (
+                <label
+                  key={style.id}
+                  className={cn(
+                    'flex items-center gap-3 p-3 rounded-lg border-2 transition-all duration-200 cursor-pointer',
+                    enabledStyles[style.id]
+                      ? 'border-hp-blue/30 bg-hp-blue/[0.02]'
+                      : 'border-muted bg-muted/30 opacity-60'
+                  )}
+                >
+                  <Checkbox
+                    checked={enabledStyles[style.id]}
+                    onCheckedChange={(checked) =>
+                      handleStyleToggle(style.id, checked === true)
+                    }
+                    disabled={disabled}
+                    className="shrink-0"
+                  />
+                  <span className="text-xl shrink-0">{style.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-medium text-sm">{style.nameEs}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5 line-clamp-1">
+                      {style.description}
+                    </div>
+                  </div>
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <Separator />
+
           {/* Summary */}
           <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
             <div className="flex items-center gap-2">
@@ -222,6 +281,10 @@ export function SettingsPanel({
                   </span>
                 </>
               )}
+              <span className="text-muted-foreground">Estilos activos:</span>
+              <span className="font-medium">
+                {STYLE_OPTIONS.filter((s) => enabledStyles[s.id]).map((s) => s.nameEs).join(', ')}
+              </span>
             </div>
           </div>
         </div>

@@ -18,7 +18,7 @@ import {
   Loader2,
   Settings2,
 } from 'lucide-react';
-import type { StyleId } from '@/lib/styles';
+import { getDefaultEnabledStyles, type StyleId } from '@/lib/styles';
 import type { ProviderId, OpenAIModelId } from '@/lib/providers';
 import { OPENAI_MODELS } from '@/lib/providers';
 
@@ -33,12 +33,14 @@ export default function Home() {
 
   // Style
   const [selectedStyle, setSelectedStyle] = useState<StyleId | null>(null);
+  const [customPrompt, setCustomPrompt] = useState('');
 
   // Settings (provider, API key, model)
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [selectedProvider, setSelectedProvider] = useState<ProviderId>('zai');
   const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [openaiModel, setOpenaiModel] = useState<OpenAIModelId>('gpt-image-1');
+  const [openaiModel, setOpenaiModel] = useState<OpenAIModelId>('gpt-image-2');
+  const [enabledStyles, setEnabledStyles] = useState<Record<StyleId, boolean>>(getDefaultEnabledStyles());
 
   // Config persistence — track if initial load is done
   const configLoadedRef = useRef(false);
@@ -47,12 +49,18 @@ export default function Home() {
   useEffect(() => {
     async function loadConfig() {
       try {
-        const res = await fetch('/api/config');
+        const res = await fetch('/api/config?XTransformPort=3002');
         const data = await res.json();
         if (data.success && data.config) {
           setSelectedProvider((data.config.provider as ProviderId) || 'zai');
           setOpenaiApiKey(data.config.openaiApiKey || '');
-          setOpenaiModel((data.config.openaiModel as OpenAIModelId) || 'gpt-image-1');
+          setOpenaiModel((data.config.openaiModel as OpenAIModelId) || 'gpt-image-2');
+          if (data.config.enabledStyles) {
+            setEnabledStyles({
+              ...getDefaultEnabledStyles(),
+              ...data.config.enabledStyles,
+            });
+          }
         }
       } catch (err) {
         console.error('Error loading config:', err);
@@ -69,13 +77,14 @@ export default function Home() {
 
     async function saveConfig() {
       try {
-        await fetch('/api/config', {
+        await fetch('/api/config?XTransformPort=3002', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             provider: selectedProvider,
             openaiApiKey,
             openaiModel,
+            enabledStyles,
           }),
         });
       } catch (err) {
@@ -83,7 +92,7 @@ export default function Home() {
       }
     }
     saveConfig();
-  }, [selectedProvider, openaiApiKey, openaiModel]);
+  }, [selectedProvider, openaiApiKey, openaiModel, enabledStyles]);
 
   // Transform state
   const [isTransforming, setIsTransforming] = useState(false);
@@ -112,6 +121,16 @@ export default function Home() {
   const handleTransform = useCallback(async () => {
     if (!sourceImage || !selectedStyle) return;
 
+    // Validate custom prompt
+    if (selectedStyle === 'custom' && !customPrompt.trim()) {
+      toast({
+        title: 'Prompt requerido',
+        description: 'Por favor escribe un prompt para el estilo personalizado',
+        variant: 'destructive',
+      });
+      return;
+    }
+
     if (selectedProvider === 'openai' && !openaiApiKey.trim()) {
       toast({
         title: 'API Key requerida',
@@ -127,12 +146,13 @@ export default function Home() {
     setResult(null);
 
     try {
-      const response = await fetch('/api/transform', {
+      const response = await fetch('/api/transform?XTransformPort=3002', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           image: sourceImage,
           styleId: selectedStyle,
+          customPrompt: selectedStyle === 'custom' ? customPrompt.trim() : undefined,
           provider: selectedProvider,
           openaiApiKey:
             selectedProvider === 'openai' ? openaiApiKey.trim() : undefined,
@@ -175,9 +195,15 @@ export default function Home() {
     } finally {
       setIsTransforming(false);
     }
-  }, [sourceImage, selectedStyle, selectedProvider, openaiApiKey, openaiModel, toast]);
+  }, [sourceImage, selectedStyle, customPrompt, selectedProvider, openaiApiKey, openaiModel, toast]);
 
   const handleReset = useCallback(() => {
+    setResult(null);
+  }, []);
+
+  // When changing style away from custom, don't clear customPrompt so it persists
+  const handleStyleSelect = useCallback((styleId: StyleId) => {
+    setSelectedStyle(styleId);
     setResult(null);
   }, []);
 
@@ -263,8 +289,11 @@ export default function Home() {
           </div>
           <StyleSelector
             selectedStyle={selectedStyle}
-            onSelect={setSelectedStyle}
+            onSelect={handleStyleSelect}
+            enabledStyles={enabledStyles}
             disabled={isTransforming}
+            customPrompt={customPrompt}
+            onCustomPromptChange={setCustomPrompt}
           />
         </section>
 
@@ -275,7 +304,7 @@ export default function Home() {
           <Button
             size="lg"
             className="w-full max-w-md h-14 text-lg font-semibold gap-2 rounded-xl bg-hp-blue hover:bg-hp-blue/90 text-white shadow-lg"
-            disabled={!sourceImage || !selectedStyle || isTransforming}
+            disabled={!sourceImage || !selectedStyle || (selectedStyle === 'custom' && !customPrompt.trim()) || isTransforming}
             onClick={handleTransform}
           >
             {isTransforming ? (
@@ -366,6 +395,8 @@ export default function Home() {
         onApiKeyChange={setOpenaiApiKey}
         openaiModel={openaiModel}
         onModelChange={setOpenaiModel}
+        enabledStyles={enabledStyles}
+        onEnabledStylesChange={setEnabledStyles}
         disabled={isTransforming}
       />
     </div>

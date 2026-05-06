@@ -1,5 +1,11 @@
 {
   "provider": "openai",
   "openaiApiKey": "",
-  "openaiModel": "gpt-image-1"
+  "openaiModel": "gpt-image-2",
+  "enabledStyles": {
+    "amigurumi": true,
+    "anime": true,
+    "mundial": false,
+    "custom": false
+  }
 }

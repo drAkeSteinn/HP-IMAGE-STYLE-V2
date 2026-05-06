@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
+import { getDefaultEnabledStyles, type StyleId } from '@/lib/styles';
 
 const CONFIG_PATH = join(process.cwd(), 'data', 'config.json');
 
@@ -8,22 +9,32 @@ interface AppConfig {
   provider: string;
   openaiApiKey: string;
   openaiModel: string;
+  enabledStyles: Record<StyleId, boolean>;
 }
 
 const DEFAULT_CONFIG: AppConfig = {
   provider: 'zai',
   openaiApiKey: '',
-  openaiModel: 'gpt-image-1',
+  openaiModel: 'gpt-image-2',
+  enabledStyles: getDefaultEnabledStyles(),
 };
 
 async function readConfig(): Promise<AppConfig> {
   try {
     const raw = await readFile(CONFIG_PATH, 'utf-8');
     const config = JSON.parse(raw) as Partial<AppConfig>;
-    return { ...DEFAULT_CONFIG, ...config };
+    return {
+      ...DEFAULT_CONFIG,
+      ...config,
+      // Merge enabledStyles with defaults so new styles get enabled automatically
+      enabledStyles: {
+        ...getDefaultEnabledStyles(),
+        ...(config.enabledStyles || {}),
+      },
+    };
   } catch {
     // If file doesn't exist or is invalid, return defaults
-    return { ...DEFAULT_CONFIG };
+    return { ...DEFAULT_CONFIG, enabledStyles: getDefaultEnabledStyles() };
   }
 }
 
@@ -38,7 +49,7 @@ export async function GET() {
   } catch (error) {
     console.error('Error reading config:', error);
     return NextResponse.json(
-      { success: true, config: DEFAULT_CONFIG }
+      { success: true, config: { ...DEFAULT_CONFIG, enabledStyles: getDefaultEnabledStyles() } }
     );
   }
 }
@@ -46,12 +57,16 @@ export async function GET() {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { provider, openaiApiKey, openaiModel } = body as Partial<AppConfig>;
+    const { provider, openaiApiKey, openaiModel, enabledStyles } = body as Partial<AppConfig>;
 
     const config: AppConfig = {
       provider: provider || DEFAULT_CONFIG.provider,
       openaiApiKey: openaiApiKey ?? DEFAULT_CONFIG.openaiApiKey,
       openaiModel: openaiModel || DEFAULT_CONFIG.openaiModel,
+      enabledStyles: {
+        ...getDefaultEnabledStyles(),
+        ...(enabledStyles || {}),
+      },
     };
 
     await writeConfig(config);
