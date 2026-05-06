@@ -1,0 +1,20 @@
+=========================================
+Node.js / Next.js Windows start log
+=========================================
+
+C:\nvm4w\nodejs\node.exe
+C:\nvm4w\nodejs\npm
+C:\nvm4w\nodejs\npm.cmd
+[INFO] Prisma detectado. Ejecutando generate antes de iniciar... 
+Environment variables loaded from .env
+Prisma schema loaded from prisma\schema.prisma
+
+✔ Generated Prisma Client (v6.19.3) to .\node_modules\@prisma\client in 107ms
+
+Start by importing your Prisma Client (See: https://pris.ly/d/importing-client)
+
+Tip: Interested in query caching in just a few lines of code? Try Accelerate today! https://pris.ly/tip-3-accelerate
+
+URL local: http://localhost:3000
+URL red local: http://192.168.0.177:3000
+Ejecutando npm run dev:windows
