@@ -11,6 +11,8 @@ import {
 } from '@/components/ui/select';
 import { Card, CardContent } from '@/components/ui/card';
 import { Camera, SwitchCamera, X, Video, VideoOff } from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { resizeImageToMaxSize } from '@/lib/image-utils';
 
 interface CameraCaptureProps {
   onCapture: (imageDataUrl: string) => void;
@@ -23,6 +25,7 @@ export function CameraCapture({
   capturedImage,
   onClear,
 }: CameraCaptureProps) {
+  const { toast } = useToast();
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -108,7 +111,7 @@ export function CameraCapture({
   }, []);
 
   // Capture photo
-  const capturePhoto = useCallback(() => {
+  const capturePhoto = useCallback(async () => {
     if (!videoRef.current || !canvasRef.current) return;
 
     const video = videoRef.current;
@@ -127,7 +130,9 @@ export function CameraCapture({
     ctx.setTransform(1, 0, 0, 1, 0, 0);
 
     const dataUrl = canvas.toDataURL('image/jpeg', 0.9);
-    onCapture(dataUrl);
+    // Resize to 600px max on longest side for display
+    const resized = await resizeImageToMaxSize(dataUrl, 600);
+    onCapture(resized);
   }, [onCapture]);
 
   // Handle device change
@@ -144,12 +149,29 @@ export function CameraCapture({
   // Refresh devices when dropdown is opened
   const handleSelectOpen = useCallback(
     (open: boolean) => {
+      if (open && !isStreaming) {
+        toast({
+          title: 'Inicia la cámara primero',
+          description: 'Debes iniciar la cámara antes de poder seleccionar una diferente.',
+          variant: 'destructive',
+        });
+        return;
+      }
       if (open) {
         refreshDevices();
       }
     },
-    [refreshDevices]
+    [isStreaming, refreshDevices, toast]
   );
+
+  // Re-attach stream to video element after captured image is cleared
+  // This is needed because the video element stays in the DOM but may lose
+  // its srcObject when React toggles visibility of the preview overlay
+  useEffect(() => {
+    if (!capturedImage && isStreaming && streamRef.current && videoRef.current) {
+      videoRef.current.srcObject = streamRef.current;
+    }
+  }, [capturedImage, isStreaming]);
 
   // Listen for device changes via event (callback only, no direct setState in effect)
   useEffect(() => {
@@ -171,48 +193,20 @@ export function CameraCapture({
     };
   }, []);
 
-  // If we have a captured image, show preview
-  if (capturedImage) {
-    return (
-      <Card className="border-2 border-dashed border-hp-blue/30 overflow-hidden">
-        <CardContent className="p-4">
-          <div className="relative group">
-            <img
-              src={capturedImage}
-              alt="Foto capturada"
-              className="w-full rounded-lg object-contain max-h-[400px]"
-            />
-            <Button
-              variant="destructive"
-              size="sm"
-              className="absolute top-2 right-2 opacity-80 group-hover:opacity-100 transition-opacity"
-              onClick={onClear}
-            >
-              <X className="h-4 w-4 mr-1" />
-              Descartar
-            </Button>
-          </div>
-          <p className="text-sm text-muted-foreground text-center mt-2">
-            Foto capturada correctamente
-          </p>
-        </CardContent>
-      </Card>
-    );
-  }
-
   return (
     <Card className="border-2 border-dashed border-hp-blue/30 overflow-hidden">
       <CardContent className="p-4 space-y-4">
-        {/* Camera selector */}
+        {/* Controls bar — all in one row */}
         <div className="flex items-center gap-2">
           <Camera className="h-4 w-4 text-muted-foreground shrink-0" />
           <Select
             value={selectedDeviceId}
             onValueChange={handleDeviceChange}
             onOpenChange={handleSelectOpen}
+            disabled={!isStreaming}
           >
-            <SelectTrigger className="flex-1">
-              <SelectValue placeholder="Seleccionar cámara" />
+            <SelectTrigger className="flex-1 min-w-0">
+              <SelectValue placeholder={isStreaming ? 'Seleccionar cámara' : 'Inicia la cámara primero'} />
             </SelectTrigger>
             <SelectContent>
               {devices.length === 0 ? (
@@ -228,20 +222,50 @@ export function CameraCapture({
               )}
             </SelectContent>
           </Select>
-          {isStreaming && (
+
+          {!isStreaming ? (
             <Button
-              variant="outline"
-              size="icon"
               onClick={() => startStream(selectedDeviceId)}
-              title="Cambiar cámara"
+              className="shrink-0"
             >
-              <SwitchCamera className="h-4 w-4" />
+              <Video className="h-4 w-4 mr-2" />
+              Iniciar
             </Button>
+          ) : (
+            <>
+              <Button
+                variant="outline"
+                size="icon"
+                onClick={() => startStream(selectedDeviceId)}
+                title="Cambiar cámara"
+                className="shrink-0"
+              >
+                <SwitchCamera className="h-4 w-4" />
+              </Button>
+              <Button
+                onClick={capturePhoto}
+                variant="default"
+                disabled={!!capturedImage}
+                className="shrink-0"
+              >
+                <Camera className="h-4 w-4 mr-2" />
+                Capturar
+              </Button>
+              <Button
+                onClick={stopStream}
+                variant="outline"
+                className="shrink-0"
+              >
+                <VideoOff className="h-4 w-4 mr-2" />
+                Detener
+              </Button>
+            </>
           )}
         </div>
 
-        {/* Video preview */}
+        {/* Video / Preview area — single container, video always in DOM */}
         <div className="relative bg-black/5 rounded-lg overflow-hidden aspect-video flex items-center justify-center">
+          {/* Video element always rendered so stream stays connected */}
           <video
             ref={videoRef}
             autoPlay
@@ -249,14 +273,37 @@ export function CameraCapture({
             muted
             className={`w-full h-full object-cover ${isStreaming ? 'scale-x-[-1]' : ''}`}
           />
-          {!isStreaming && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground">
+
+          {/* Placeholder when camera is off */}
+          {!isStreaming && !capturedImage && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-muted-foreground bg-background/80">
               <Camera className="h-12 w-12 opacity-30" />
               <p className="text-sm">
-                Presiona &quot;Iniciar cámara&quot; para comenzar
+                Presiona &quot;Iniciar&quot; para comenzar
               </p>
             </div>
           )}
+
+          {/* Captured image overlay — covers the video but doesn't unmount it */}
+          {capturedImage && (
+            <div className="absolute inset-0">
+              <img
+                src={capturedImage}
+                alt="Foto capturada"
+                className="w-full h-full object-contain"
+              />
+              <Button
+                variant="destructive"
+                size="sm"
+                className="absolute top-2 right-2 opacity-80 hover:opacity-100 transition-opacity"
+                onClick={onClear}
+              >
+                <X className="h-4 w-4 mr-1" />
+                Descartar
+              </Button>
+            </div>
+          )}
+
           {error && (
             <div className="absolute inset-0 flex items-center justify-center bg-destructive/10">
               <p className="text-sm text-destructive text-center px-4">
@@ -266,33 +313,12 @@ export function CameraCapture({
           )}
         </div>
 
-        {/* Controls */}
-        <div className="flex gap-2">
-          {!isStreaming ? (
-            <Button
-              onClick={() => startStream(selectedDeviceId)}
-              className="flex-1"
-            >
-              <Video className="h-4 w-4 mr-2" />
-              Iniciar cámara
-            </Button>
-          ) : (
-            <>
-              <Button
-                onClick={capturePhoto}
-                className="flex-1"
-                variant="default"
-              >
-                <Camera className="h-4 w-4 mr-2" />
-                Capturar foto
-              </Button>
-              <Button onClick={stopStream} variant="outline">
-                <VideoOff className="h-4 w-4 mr-2" />
-                Detener
-              </Button>
-            </>
-          )}
-        </div>
+        {/* Status text when image captured */}
+        {capturedImage && (
+          <p className="text-sm text-muted-foreground text-center">
+            Foto capturada correctamente — descarta para tomar otra
+          </p>
+        )}
 
         {/* Hidden canvas for capturing */}
         <canvas ref={canvasRef} className="hidden" />

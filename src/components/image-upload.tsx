@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Upload, X, Image as ImageIcon } from 'lucide-react';
+import { resizeImageToMaxSize } from '@/lib/image-utils';
 
 interface ImageUploadProps {
   onUpload: (imageDataUrl: string) => void;
@@ -20,16 +21,18 @@ export function ImageUpload({
   const [isDragOver, setIsDragOver] = useState(false);
 
   const processFile = useCallback(
-    (file: File) => {
+    async (file: File) => {
       if (!file.type.startsWith('image/')) {
         return;
       }
 
       const reader = new FileReader();
-      reader.onload = (e) => {
+      reader.onload = async (e) => {
         const result = e.target?.result as string;
         if (result) {
-          onUpload(result);
+          // Resize to 600px max on longest side for display
+          const resized = await resizeImageToMaxSize(result, 600);
+          onUpload(resized);
         }
       };
       reader.readAsDataURL(file);

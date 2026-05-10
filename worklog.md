@@ -63,3 +63,21 @@ Stage Summary:
 - All UI elements (header, buttons, step indicators, loading states, badges) use the HP blue
 - White background preserved, blue as the dominant accent color
 - Style selector cards still have their own identity colors (rose, blue, emerald, cyan)
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Add Sync button for API Key from Google Drive file + Remove Z.ai provider + Keep only GPT Image 1
+
+Work Log:
+- Created `/src/app/api/sync-api-key/route.ts` — New POST endpoint that fetches the API key from Google Drive (file ID 16WrMjxOMw8lF3Kl6QJxYL6Wa1smtJd2b), validates it starts with 'sk-', updates the config.json, and returns masked key
+- Updated `/src/components/settings-panel.tsx` — Removed provider/model props, added "Sincronizar" button with 3 states (idle/syncing/success/error), green indicator when API key is configured, amber warning when no key, toast notifications for sync results
+- Updated `/src/app/page.tsx` — Removed `selectedProvider`, `openaiModel` state variables and related props, hardcoded provider='openai' and openaiModel='gpt-image-1', simplified SettingsPanel props
+- Lint passes clean, dev server running without errors
+
+Stage Summary:
+- Sync button fetches API Key from Google Drive file and saves to config.json
+- Green indicator shows when API Key is configured, amber when missing
+- Z.ai provider completely removed, only OpenAI remains
+- Only GPT Image 1 model available (hardcoded)
+- Config persistence works: styles visibility + API Key saved to JSON

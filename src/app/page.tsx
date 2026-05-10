@@ -7,66 +7,84 @@ import { StyleSelector } from '@/components/style-selector';
 import { SettingsPanel } from '@/components/settings-panel';
 import { ImageCompare } from '@/components/image-compare';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent } from '@/components/ui/card';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import {
   Camera,
   Upload,
   Sparkles,
-  Loader2,
+  ArrowRight,
+  ArrowLeft,
+  RotateCcw,
   Settings2,
 } from 'lucide-react';
-import { getDefaultEnabledStyles, type StyleId } from '@/lib/styles';
-import type { ProviderId, OpenAIModelId } from '@/lib/providers';
+import { getDefaultEnabledStyles, STYLE_OPTIONS, type StyleId } from '@/lib/styles';
 import { OPENAI_MODELS } from '@/lib/providers';
 
 type ImageSource = 'camera' | 'upload';
+type AppStep = 1 | 2 | 3;
 
 export default function Home() {
   const { toast } = useToast();
 
+  // Step flow
+  const [step, setStep] = useState<AppStep>(1);
+
   // Image source
-  const [imageSource, setImageSource] = useState<ImageSource>('upload');
+  const [imageSource, setImageSource] = useState<ImageSource>('camera');
   const [sourceImage, setSourceImage] = useState<string | null>(null);
 
   // Style
   const [selectedStyle, setSelectedStyle] = useState<StyleId | null>(null);
   const [customPrompt, setCustomPrompt] = useState('');
 
-  // Settings (provider, API key, model)
+  // Settings (API key, model)
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [selectedProvider, setSelectedProvider] = useState<ProviderId>('zai');
   const [openaiApiKey, setOpenaiApiKey] = useState('');
-  const [openaiModel, setOpenaiModel] = useState<OpenAIModelId>('gpt-image-2');
   const [enabledStyles, setEnabledStyles] = useState<Record<StyleId, boolean>>(getDefaultEnabledStyles());
 
   // Config persistence — track if initial load is done
   const configLoadedRef = useRef(false);
 
-  // Load config from server on mount
+  // Load config from server on mount (with retry for initial compilation)
   useEffect(() => {
-    async function loadConfig() {
-      try {
-        const res = await fetch('/api/config?XTransformPort=3002');
-        const data = await res.json();
-        if (data.success && data.config) {
-          setSelectedProvider((data.config.provider as ProviderId) || 'zai');
-          setOpenaiApiKey(data.config.openaiApiKey || '');
-          setOpenaiModel((data.config.openaiModel as OpenAIModelId) || 'gpt-image-2');
-          if (data.config.enabledStyles) {
-            setEnabledStyles({
-              ...getDefaultEnabledStyles(),
-              ...data.config.enabledStyles,
-            });
+    async function loadConfig(retries = 3) {
+      for (let attempt = 0; attempt < retries; attempt++) {
+        try {
+          const res = await fetch('/api/config?XTransformPort=3002');
+
+          const contentType = res.headers.get('content-type') || '';
+          if (!contentType.includes('application/json') || !res.ok) {
+            if (attempt < retries - 1) {
+              await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+              continue;
+            }
+            break;
+          }
+
+          const data = await res.json();
+          if (data.success && data.config) {
+            setOpenaiApiKey(data.config.openaiApiKey || '');
+            if (data.config.enabledStyles) {
+              setEnabledStyles({
+                ...getDefaultEnabledStyles(),
+                ...data.config.enabledStyles,
+              });
+            }
+          }
+          break;
+        } catch (err) {
+          console.error('Error loading config:', err);
+          if (attempt < retries - 1) {
+            await new Promise((r) => setTimeout(r, 500 * (attempt + 1)));
+          }
+        } finally {
+          if (attempt === retries - 1) {
+            configLoadedRef.current = true;
           }
         }
-      } catch (err) {
-        console.error('Error loading config:', err);
-      } finally {
-        configLoadedRef.current = true;
       }
+      configLoadedRef.current = true;
     }
     loadConfig();
   }, []);
@@ -77,22 +95,26 @@ export default function Home() {
 
     async function saveConfig() {
       try {
-        await fetch('/api/config?XTransformPort=3002', {
+        const res = await fetch('/api/config?XTransformPort=3002', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            provider: selectedProvider,
+            provider: 'openai',
             openaiApiKey,
-            openaiModel,
+            openaiModel: 'gpt-image-1',
             enabledStyles,
           }),
         });
+        const contentType = res.headers.get('content-type') || '';
+        if (contentType.includes('application/json')) {
+          await res.json();
+        }
       } catch (err) {
         console.error('Error saving config:', err);
       }
     }
     saveConfig();
-  }, [selectedProvider, openaiApiKey, openaiModel, enabledStyles]);
+  }, [openaiApiKey, enabledStyles]);
 
   // Transform state
   const [isTransforming, setIsTransforming] = useState(false);
@@ -105,23 +127,34 @@ export default function Home() {
   // Handlers
   const handleCapture = useCallback((imageDataUrl: string) => {
     setSourceImage(imageDataUrl);
-    setResult(null);
   }, []);
 
   const handleUpload = useCallback((imageDataUrl: string) => {
     setSourceImage(imageDataUrl);
-    setResult(null);
   }, []);
 
   const handleClearSource = useCallback(() => {
     setSourceImage(null);
+  }, []);
+
+  const handleStyleSelect = useCallback((styleId: StyleId) => {
+    setSelectedStyle(styleId);
+  }, []);
+
+  // Step navigation
+  const goToStep2 = useCallback(() => {
+    if (!sourceImage) return;
+    setStep(2);
+  }, [sourceImage]);
+
+  const goToStep1 = useCallback(() => {
+    setStep(1);
     setResult(null);
   }, []);
 
   const handleTransform = useCallback(async () => {
     if (!sourceImage || !selectedStyle) return;
 
-    // Validate custom prompt
     if (selectedStyle === 'custom' && !customPrompt.trim()) {
       toast({
         title: 'Prompt requerido',
@@ -131,7 +164,7 @@ export default function Home() {
       return;
     }
 
-    if (selectedProvider === 'openai' && !openaiApiKey.trim()) {
+    if (!openaiApiKey.trim()) {
       toast({
         title: 'API Key requerida',
         description:
@@ -144,6 +177,7 @@ export default function Home() {
 
     setIsTransforming(true);
     setResult(null);
+    setStep(3);
 
     try {
       const response = await fetch('/api/transform?XTransformPort=3002', {
@@ -153,11 +187,9 @@ export default function Home() {
           image: sourceImage,
           styleId: selectedStyle,
           customPrompt: selectedStyle === 'custom' ? customPrompt.trim() : undefined,
-          provider: selectedProvider,
-          openaiApiKey:
-            selectedProvider === 'openai' ? openaiApiKey.trim() : undefined,
-          openaiModel:
-            selectedProvider === 'openai' ? openaiModel : undefined,
+          provider: 'openai',
+          openaiApiKey: openaiApiKey.trim(),
+          openaiModel: 'gpt-image-1',
         }),
       });
 
@@ -167,10 +199,7 @@ export default function Home() {
         throw new Error(data.error || 'Error en la transformación');
       }
 
-      const modelLabel =
-        selectedProvider === 'openai'
-          ? OPENAI_MODELS.find((m) => m.id === openaiModel)?.name || openaiModel
-          : 'Z.ai';
+      const modelLabel = OPENAI_MODELS[0]?.name || 'GPT Image 1';
 
       setResult({
         original: sourceImage,
@@ -192,30 +221,34 @@ export default function Home() {
             : 'Ocurrió un error inesperado',
         variant: 'destructive',
       });
+      setStep(2);
     } finally {
       setIsTransforming(false);
     }
-  }, [sourceImage, selectedStyle, customPrompt, selectedProvider, openaiApiKey, openaiModel, toast]);
+  }, [sourceImage, selectedStyle, customPrompt, openaiApiKey, toast]);
 
   const handleReset = useCallback(() => {
     setResult(null);
-  }, []);
-
-  // When changing style away from custom, don't clear customPrompt so it persists
-  const handleStyleSelect = useCallback((styleId: StyleId) => {
-    setSelectedStyle(styleId);
-    setResult(null);
+    setStep(1);
+    setSourceImage(null);
+    setSelectedStyle(null);
+    setCustomPrompt('');
   }, []);
 
   // Helper for provider display
-  const providerLabel =
-    selectedProvider === 'zai'
-      ? 'Z.ai'
-      : OPENAI_MODELS.find((m) => m.id === openaiModel)?.name || 'OpenAI';
+  const providerLabel = OPENAI_MODELS[0]?.name || 'GPT Image 1';
+
+  // Selected style name
+  const selectedStyleName = selectedStyle
+    ? STYLE_OPTIONS.find((s) => s.id === selectedStyle)?.nameEs || ''
+    : '';
+
+  // Show floating action bar on steps 1 and 2 (not during transform on step 3)
+  const showFloatingBar = step === 1 || (step === 2 && !isTransforming);
 
   return (
     <div className="min-h-screen flex flex-col bg-background">
-      {/* Header — Banner only, no controls */}
+      {/* Header — Banner */}
       <header className="sticky top-0 z-40 bg-white">
         <div className="max-w-5xl mx-auto px-4">
           <img
@@ -226,142 +259,206 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Main content */}
-      <main className="flex-1 max-w-5xl mx-auto w-full px-4 py-6 space-y-6">
-        {/* Step 1: Image Source */}
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-hp-blue text-white text-sm font-bold">
-              1
-            </div>
-            <h2 className="font-semibold text-lg">Selecciona tu imagen</h2>
-          </div>
-
-          <Tabs
-            value={imageSource}
-            onValueChange={(v) => {
-              setImageSource(v as ImageSource);
-              setSourceImage(null);
-              setResult(null);
-            }}
-          >
-            <TabsList className="grid w-full grid-cols-2 mb-4">
-              <TabsTrigger value="upload" className="gap-2">
-                <Upload className="h-4 w-4" />
-                Subir imagen
-              </TabsTrigger>
-              <TabsTrigger value="camera" className="gap-2">
-                <Camera className="h-4 w-4" />
-                Cámara web
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="upload">
-              <ImageUpload
-                onUpload={handleUpload}
-                uploadedImage={imageSource === 'upload' ? sourceImage : null}
-                onClear={handleClearSource}
-              />
-            </TabsContent>
-
-            <TabsContent value="camera">
-              <CameraCapture
-                onCapture={(img) => {
-                  setImageSource('camera');
-                  handleCapture(img);
-                }}
-                capturedImage={imageSource === 'camera' ? sourceImage : null}
-                onClear={handleClearSource}
-              />
-            </TabsContent>
-          </Tabs>
-        </section>
-
-        <Separator />
-
-        {/* Step 2: Choose Style */}
-        <section>
-          <div className="flex items-center gap-2 mb-3">
-            <div className="flex items-center justify-center w-7 h-7 rounded-full bg-hp-blue text-white text-sm font-bold">
-              2
-            </div>
-            <h2 className="font-semibold text-lg">Elige un estilo</h2>
-          </div>
-          <StyleSelector
-            selectedStyle={selectedStyle}
-            onSelect={handleStyleSelect}
-            enabledStyles={enabledStyles}
-            disabled={isTransforming}
-            customPrompt={customPrompt}
-            onCustomPromptChange={setCustomPrompt}
-          />
-        </section>
-
-        <Separator />
-
-        {/* Transform Button */}
-        <section className="flex flex-col items-center gap-3">
-          <Button
-            size="lg"
-            className="w-full max-w-md h-14 text-lg font-semibold gap-2 rounded-xl bg-hp-blue hover:bg-hp-blue/90 text-white shadow-lg"
-            disabled={!sourceImage || !selectedStyle || (selectedStyle === 'custom' && !customPrompt.trim()) || isTransforming}
-            onClick={handleTransform}
-          >
-            {isTransforming ? (
-              <>
-                <Loader2 className="h-5 w-5 animate-spin" />
-                Transformando...
-              </>
-            ) : (
-              <>
-                <Sparkles className="h-5 w-5" />
-                Transformar imagen
-              </>
-            )}
-          </Button>
-
-          {!sourceImage && (
-            <p className="text-sm text-muted-foreground">
-              Sube o captura una imagen para comenzar
-            </p>
-          )}
-          {sourceImage && !selectedStyle && (
-            <p className="text-sm text-muted-foreground">
-              Selecciona un estilo para tu transformación
-            </p>
-          )}
-        </section>
-
-        {/* Loading animation */}
-        {isTransforming && (
-          <Card className="border-hp-blue/20 bg-hp-blue/5">
-            <CardContent className="p-8 flex flex-col items-center gap-4">
-              <div className="relative">
-                <Loader2 className="h-12 w-12 animate-spin text-hp-blue" />
-                <Sparkles className="h-5 w-5 absolute -top-1 -right-1 text-hp-blue animate-pulse" />
+      {/* Step indicator bar */}
+      <div className="bg-white border-b">
+        <div className="max-w-5xl mx-auto px-4 py-3">
+          <div className="flex items-center justify-center gap-2 sm:gap-4">
+            {[
+              { n: 1, label: 'Imagen' },
+              { n: 2, label: 'Estilo' },
+              { n: 3, label: 'Resultado' },
+            ].map((s, i) => (
+              <div key={s.n} className="flex items-center gap-2 sm:gap-4">
+                {i > 0 && (
+                  <div
+                    className={`w-6 sm:w-12 h-0.5 rounded transition-colors duration-300 ${
+                      step >= s.n ? 'bg-hp-blue' : 'bg-muted'
+                    }`}
+                  />
+                )}
+                <div className="flex items-center gap-1.5">
+                  <div
+                    className={`flex items-center justify-center w-7 h-7 rounded-full text-sm font-bold transition-colors duration-300 ${
+                      step === s.n
+                        ? 'bg-hp-blue text-white'
+                        : step > s.n
+                          ? 'bg-hp-blue/20 text-hp-blue'
+                          : 'bg-muted text-muted-foreground'
+                    }`}
+                  >
+                    {step > s.n ? '✓' : s.n}
+                  </div>
+                  <span
+                    className={`text-xs sm:text-sm font-medium transition-colors duration-300 ${
+                      step === s.n
+                        ? 'text-hp-blue'
+                        : step > s.n
+                          ? 'text-hp-blue/70'
+                          : 'text-muted-foreground'
+                    }`}
+                  >
+                    {s.label}
+                  </span>
+                </div>
               </div>
-              <div className="text-center">
-                <p className="font-semibold">
-                  Aplicando transformación con IA...
-                </p>
-                <p className="text-sm text-muted-foreground mt-1">
-                  Esto puede tardar unos segundos. La IA está recreando tu
-                  imagen en el estilo seleccionado usando {providerLabel}.
-                </p>
-              </div>
-            </CardContent>
-          </Card>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      {/* Main content — extra bottom padding when floating bar is visible */}
+      <main className={`flex-1 max-w-5xl mx-auto w-full px-4 py-6 ${showFloatingBar ? 'pb-28' : ''}`}>
+        {/* ─── STEP 1: Select Image ─── */}
+        {step === 1 && (
+          <section className="space-y-5 animate-in fade-in duration-300">
+            <div className="flex items-center gap-2 mb-1">
+              <h2 className="font-semibold text-lg">Selecciona tu imagen</h2>
+            </div>
+
+            <Tabs
+              value={imageSource}
+              onValueChange={(v) => {
+                setImageSource(v as ImageSource);
+                setSourceImage(null);
+              }}
+            >
+              <TabsList className="grid w-full grid-cols-2 mb-4">
+                <TabsTrigger value="camera" className="gap-2">
+                  <Camera className="h-4 w-4" />
+                  Cámara web
+                </TabsTrigger>
+                <TabsTrigger value="upload" className="gap-2">
+                  <Upload className="h-4 w-4" />
+                  Subir imagen
+                </TabsTrigger>
+              </TabsList>
+
+              <TabsContent value="camera">
+                <CameraCapture
+                  onCapture={(img) => {
+                    setImageSource('camera');
+                    handleCapture(img);
+                  }}
+                  capturedImage={imageSource === 'camera' ? sourceImage : null}
+                  onClear={handleClearSource}
+                />
+              </TabsContent>
+
+              <TabsContent value="upload">
+                <ImageUpload
+                  onUpload={handleUpload}
+                  uploadedImage={imageSource === 'upload' ? sourceImage : null}
+                  onClear={handleClearSource}
+                />
+              </TabsContent>
+            </Tabs>
+          </section>
         )}
 
-        {/* Result */}
-        {result && (
-          <section>
-            <ImageCompare
-              originalImage={result.original}
-              transformedImage={result.transformed}
-              styleName={result.styleName}
-              onReset={handleReset}
+        {/* ─── STEP 2: Choose Style ─── */}
+        {step === 2 && (
+          <section className="space-y-5 animate-in fade-in duration-300">
+            {/* Back + title row */}
+            <div className="flex items-center gap-3">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={goToStep1}
+                className="gap-1 text-muted-foreground hover:text-foreground -ml-2"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Atrás
+              </Button>
+              <h2 className="font-semibold text-lg">Elige un estilo</h2>
+            </div>
+
+            {/* Source image thumbnail */}
+            {sourceImage && (
+              <div className="flex items-center gap-3 p-3 rounded-lg bg-muted/40 border">
+                <img
+                  src={sourceImage}
+                  alt="Imagen seleccionada"
+                  className="h-16 w-16 rounded-md object-cover"
+                />
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium">Tu imagen</p>
+                  <p className="text-xs text-muted-foreground">
+                    {imageSource === 'camera' ? 'Capturada con cámara' : 'Imagen subida'}
+                  </p>
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={goToStep1}
+                  className="shrink-0"
+                >
+                  Cambiar
+                </Button>
+              </div>
+            )}
+
+            {/* Style selector */}
+            <StyleSelector
+              selectedStyle={selectedStyle}
+              onSelect={handleStyleSelect}
+              enabledStyles={enabledStyles}
+              disabled={isTransforming}
+              customPrompt={customPrompt}
+              onCustomPromptChange={setCustomPrompt}
             />
+          </section>
+        )}
+
+        {/* ─── STEP 3: Result ─── */}
+        {step === 3 && (
+          <section className="space-y-5 animate-in fade-in duration-300">
+            {isTransforming && (
+              <div className="flex flex-col items-center py-8">
+                {/* Loop video animation — 600x600, no frames */}
+                <video
+                  src="/hp-loading.mp4"
+                  autoPlay
+                  loop
+                  muted
+                  playsInline
+                  className="w-[600px] h-[600px] max-w-full object-contain"
+                />
+
+                <p className="mt-6 text-center text-sm text-muted-foreground max-w-md">
+                  Transformando la imagen con Inteligencia Artificial potenciada por equipos HP
+                </p>
+              </div>
+            )}
+
+            {!isTransforming && result && (
+              <div className="space-y-5">
+                <ImageCompare
+                  originalImage={result.original}
+                  transformedImage={result.transformed}
+                  styleName={result.styleName}
+                  onReset={handleReset}
+                />
+
+                {/* Action buttons after result */}
+                <div className="flex flex-col sm:flex-row items-center gap-3 max-w-md mx-auto">
+                  <Button
+                    variant="outline"
+                    className="w-full sm:flex-1 gap-2"
+                    onClick={goToStep1}
+                  >
+                    <RotateCcw className="h-4 w-4" />
+                    Nueva transformación
+                  </Button>
+                  <Button
+                    variant="outline"
+                    className="w-full sm:flex-1 gap-2"
+                    onClick={goToStep2}
+                  >
+                    Probar otro estilo
+                  </Button>
+                </div>
+              </div>
+            )}
           </section>
         )}
       </main>
@@ -375,11 +472,57 @@ export default function Home() {
         </div>
       </footer>
 
-      {/* Floating Settings Button */}
+      {/* Floating Action Bar — visible on steps 1 & 2 */}
+      {showFloatingBar && (
+        <div className="fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-md border-t shadow-[0_-4px_20px_rgba(0,0,0,0.08)]">
+          <div className="max-w-5xl mx-auto px-4 py-3 flex flex-col items-center gap-2">
+            {step === 1 && (
+              <>
+                <Button
+                  size="lg"
+                  className="w-full max-w-md h-14 text-lg font-semibold gap-2 rounded-xl bg-hp-blue hover:bg-hp-blue/90 text-white shadow-lg"
+                  disabled={!sourceImage}
+                  onClick={goToStep2}
+                >
+                  Continuar
+                  <ArrowRight className="h-5 w-5" />
+                </Button>
+                {!sourceImage && (
+                  <p className="text-xs text-muted-foreground">
+                    Captura o sube una imagen para continuar
+                  </p>
+                )}
+              </>
+            )}
+            {step === 2 && (
+              <>
+                <Button
+                  size="lg"
+                  className="w-full max-w-md h-14 text-lg font-semibold gap-2 rounded-xl bg-hp-blue hover:bg-hp-blue/90 text-white shadow-lg"
+                  disabled={!selectedStyle || (selectedStyle === 'custom' && !customPrompt.trim())}
+                  onClick={handleTransform}
+                >
+                  <Sparkles className="h-5 w-5" />
+                  Transformar imagen
+                </Button>
+                {!selectedStyle && (
+                  <p className="text-xs text-muted-foreground">
+                    Selecciona un estilo para tu transformación
+                  </p>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Floating Settings Button — repositioned when floating bar is visible */}
       <button
         onClick={() => setSettingsOpen(true)}
         disabled={isTransforming}
-        className="fixed bottom-6 right-6 z-50 w-11 h-11 rounded-full bg-hp-blue text-white shadow-lg hover:bg-hp-blue/90 active:scale-95 transition-all duration-200 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed"
+        className={`fixed z-50 w-11 h-11 rounded-full bg-hp-blue text-white shadow-lg hover:bg-hp-blue/90 active:scale-95 transition-all duration-200 flex items-center justify-center disabled:opacity-50 disabled:cursor-not-allowed ${
+          showFloatingBar ? 'bottom-[88px] right-6' : 'bottom-6 right-6'
+        }`}
         aria-label="Configuración"
       >
         <Settings2 className="h-5 w-5" />
@@ -389,12 +532,8 @@ export default function Home() {
       <SettingsPanel
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
-        selectedProvider={selectedProvider}
-        onProviderChange={setSelectedProvider}
         openaiApiKey={openaiApiKey}
         onApiKeyChange={setOpenaiApiKey}
-        openaiModel={openaiModel}
-        onModelChange={setOpenaiModel}
         enabledStyles={enabledStyles}
         onEnabledStylesChange={setEnabledStyles}
         disabled={isTransforming}

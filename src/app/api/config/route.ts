@@ -13,9 +13,9 @@ interface AppConfig {
 }
 
 const DEFAULT_CONFIG: AppConfig = {
-  provider: 'zai',
+  provider: 'openai',
   openaiApiKey: '',
-  openaiModel: 'gpt-image-2',
+  openaiModel: 'gpt-image-1',
   enabledStyles: getDefaultEnabledStyles(),
 };
 
